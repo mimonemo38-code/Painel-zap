@@ -44,6 +44,13 @@ Thumbs.db
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
 
+# Secrets
+.env
+.env.*
+
+# Baileys auth (WhatsApp session data)
+artifacts/api-server/.baileys_auth/
+
 # Replit
 .cache/
 .local/

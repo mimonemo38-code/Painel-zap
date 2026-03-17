@@ -1,0 +1,7 @@
+nohup: ignoring input
+🚀 ZapAuto API Server running on http://0.0.0.0:3000
+📊 Dashboard available at http://0.0.0.0:5173
+🔗 Health check: http://0.0.0.0:3000/health
+📡 URLS PÚBLICAS:
+   API: https://mimonemo38-code-3000.app.github.dev
+   Dashboard: https://mimonemo38-code-5173.app.github.dev

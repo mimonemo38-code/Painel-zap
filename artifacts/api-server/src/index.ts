@@ -1,19 +1,57 @@
-import app from "./app";
+import express from 'express';
+import dotenv from 'dotenv';
 
-const rawPort = process.env["PORT"];
+dotenv.config();
 
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
+const app = express();
+const PORT = Number(process.env.PORT || 3000);
 
-const port = Number(rawPort);
+app.use(express.json());
 
-if (Number.isNaN(port) || port <= 0) {
-  throw new Error(`Invalid PORT value: "${rawPort}"`);
-}
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
-app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
+// API routes
+app.get('/api/messages', (req, res) => {
+  res.json({
+    messages: [
+      { id: 1, text: 'Hello from ZapAuto API!', timestamp: new Date() }
+    ]
+  });
+});
+
+app.post('/api/messages', express.json(), (req, res) => {
+  const { text } = req.body;
+  res.json({
+    id: Math.random(),
+    text,
+    timestamp: new Date()
+  });
+});
+
+// Dashboard proxy indicator
+app.get('/api/status', (req, res) => {
+  res.json({
+    api: 'running',
+    version: process.env.APP_VERSION || '0.0.0',
+    uptime: process.uptime(),
+    dashboard: process.env.DASHBOARD_URL || 'http://localhost:5173'
+  });
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 ZapAuto API Server running on http://0.0.0.0:${PORT}`);
+  console.log(`📊 Dashboard available at http://0.0.0.0:5173`);
+  console.log(`🔗 Health check: http://0.0.0.0:${PORT}/health`);
+
+  // Most Codespaces environments provide a public forward URL in these vars.
+  const codespace = process.env.CODESPACE_NAME;
+  const domain = process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN;
+  if (codespace && domain) {
+    console.log(`📡 Public URLs:`);
+    console.log(`   API: https://${codespace}-${PORT}.${domain}`);
+    console.log(`   Dashboard: https://${codespace}-5173.${domain}`);
+  }
 });

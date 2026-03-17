@@ -1,0 +1,11 @@
+nohup: ignoring input
+
+> @zap-auto/dashboard@0.0.0 dev /workspaces/codespaces-blank/Zap-Auto/artifacts/dashboard
+> vite
+
+Port 5173 is in use, trying another one...
+
+  VITE v5.4.21  ready in 314 ms
+
+  ➜  Local:   http://localhost:5174/
+  ➜  Network: http://10.0.11.123:5174/

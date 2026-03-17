@@ -6,7 +6,11 @@
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
+    "start": "pnpm --filter @zap-auto/api-server start",
+    "start:dev": "pnpm -C artifacts/api-server dev",
+    "start:dashboard": "pnpm -C artifacts/dashboard dev",
+    "deploy:docker": "docker build -t zapauto ."
   },
   "private": true,
   "devDependencies": {

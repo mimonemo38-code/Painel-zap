@@ -1,11 +1,8 @@
 {
-  "name": "@workspace/api-spec",
+  "name": "@zap-auto/api-spec",
   "version": "0.0.0",
-  "private": true,
+  "type": "module",
   "scripts": {
-    "codegen": "orval --config ./orval.config.ts"
-  },
-  "devDependencies": {
-    "orval": "^8.5.2"
+    "typecheck": "echo 'OpenAPI spec validation'"
   }
 }
