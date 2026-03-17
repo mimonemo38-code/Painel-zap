@@ -4,12 +4,12 @@
   "license": "MIT",
   "scripts": {
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock'",
-    "build": "pnpm run typecheck && pnpm -r --if-present run build",
+    "build": "npm run typecheck && npm -r --if-present run build",
     "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
-    "start": "pnpm --filter @zap-auto/api-server start",
-    "start:dev": "pnpm -C artifacts/api-server dev",
-    "start:dashboard": "pnpm -C artifacts/dashboard dev",
+    "typecheck": "npm run typecheck:libs && npm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
+    "start": "npm --filter @zap-auto/api-server start",
+    "start:dev": "npm -C artifacts/api-server dev",
+    "start:dashboard": "npm -C artifacts/dashboard dev",
     "deploy:docker": "docker build -t zapauto ."
   },
   "private": true,
