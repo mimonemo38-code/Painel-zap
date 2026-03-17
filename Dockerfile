@@ -2,20 +2,17 @@
 FROM node:24-alpine AS build
 WORKDIR /app
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
-
 # Copy monorepo metadata
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json package-lock.json pnpm-workspace.yaml ./
 
 # Copy workspace source
 COPY . .
 
 # Install dependencies
-RUN pnpm install --frozen-lockfile
+RUN npm install
 
 # Build API server
-RUN pnpm --filter @zap-auto/api-server build
+RUN npm run build
 
 # Production stage
 FROM node:24-alpine
@@ -29,4 +26,4 @@ COPY --from=build /app/artifacts/api-server/dist ./dist
 
 EXPOSE 3000
 
-CMD ["node", "dist/index.cjs"]
+CMD ["node", "dist/index.js"]

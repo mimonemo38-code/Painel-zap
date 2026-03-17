@@ -1,8 +1,8 @@
 {
   "environments": {
     "production": {
-      "buildCommand": "pnpm install && pnpm start",
-      "startCommand": "pnpm start"
+      "buildCommand": "npm install && npm run build",
+      "startCommand": "npm start"
     }
   }
 }
