@@ -1,0 +1,318 @@
+PROBLEMA 2 — PLANILHA NÃO PROCESSA CORRETAMENTE
+Implementar a lógica completa de leitura da planilha Excel em
+src/lib/spreadsheet.ts.
+Regras da aba SD4:
+Mapeamento de colunas (pelo NOME do header, não pelo índice):
+Coluna B → codigoMaterial
+Coluna D → descricao
+Coluna F → codigoOP
+Coluna G → qtdEmpenho
+Coluna H → dataPlanejada
+Coluna K → statusSetor
+Coluna N → saldoAtual
+Coluna O → qtdPC
+Coluna P → dataChegada
+Filtrar FORA linhas onde statusSetor (col K) for:
+COMERCIAL, EXPEDIÇÃO, FINALIZADA, QUALIDADE, LOGISTICA, #N/D
+
+Comparar em UPPERCASE e com trim()
+Também filtrar linhas onde codigoMaterial estiver vazio
+
+Lógica de consumo de estoque (CRÍTICO):
+Para cada material único:
+  1. Pegar saldoAtual e qtdPC do primeiro registro do material
+  2. totalDisponivel = saldoAtual + qtdPC
+  3. Ordenar todas as OPs desse material por dataPlanejada ASC
+  4. Percorrer OPs em ordem, acumulando qtdEmpenho:
+     - Se acumulado <= totalDisponivel → OP atendida
+     - No momento que acumulado > totalDisponivel → essa é a opCritica
+  5. qtdFalta = totalEmpenho - totalDisponivel (se > 0)
+Implementação:
+typescriptimport * as XLSX from 'xlsx'
+
+interface Sd4Row {
+  codigoMaterial: string
+  descricao: string
+  codigoOP: string
+  qtdEmpenho: number
+  dataPlanejada: string | null
+  statusSetor: string
+  saldoAtual: number
+  qtdPC: number
+  dataChegada: string | null
+}
+
+interface MaterialResumo {
+  codigo: string
+  descricao: string
+  saldoAtual: number
+  qtdPC: number
+  dataChegada: string | null
+  qtdFalta: number
+  totalEmpenho: number
+  opCritica: string | null
+  ops: { codigoOP: string; qtdEmpenho: number; dataPlanejada: string | null }[]
+}
+
+// Estado global em memória
+let rows: Sd4Row[] = []
+let materiaisIndex = new Map<string, MaterialResumo>()
+let opsIndex = new Map<string, { op: string; dataPlanejada: string | null; materials: MaterialResumo[] }>()
+let faltasCount = 0
+let _filename: string | null = null
+let _uploadedAt: Date | null = null
+
+const STATUSES_IGNORADOS = ['COMERCIAL', 'EXPEDICAO', 'FINALIZADA', 'QUALIDADE', 'LOGISTICA', '#N/D', 'EXPEDIÇÃO']
+
+function normalizeStatus(s: string): string {
+  return s.trim().toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // remove acentos
+}
+
+export function processSpreadsheet(buffer: Buffer, filename: string) {
+  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true })
+
+  if (!workbook.SheetNames.includes('SD4')) {
+    throw Object.assign(new Error('Aba SD4 não encontrada na planilha'), { status: 400 })
+  }
+
+  const sheet = workbook.Sheets['SD4']
+  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    header: 'A',  // usa letras como chave: A, B, C...
+    defval: '',
+  })
+
+  // Pula o header (primeira linha)
+  const dataRows = raw.slice(1)
+
+  let ignoradas = 0
+  const parsed: Sd4Row[] = []
+
+  for (const row of dataRows) {
+    const codigoMaterial = String(row['B'] ?? '').trim()
+    const statusSetor = String(row['K'] ?? '').trim()
+
+    if (!codigoMaterial) { ignoradas++; continue }
+    if (STATUSES_IGNORADOS.includes(normalizeStatus(statusSetor))) { ignoradas++; continue }
+
+    parsed.push({
+      codigoMaterial,
+      descricao: String(row['D'] ?? '').trim(),
+      codigoOP: String(row['F'] ?? '').trim(),
+      qtdEmpenho: Number(row['G']) || 0,
+      dataPlanejada: formatDate(row['H']),
+      statusSetor,
+      saldoAtual: Number(row['N']) || 0,
+      qtdPC: Number(row['O']) || 0,
+      dataChegada: formatDate(row['P']),
+    })
+  }
+
+  rows = parsed
+  _filename = filename
+  _uploadedAt = new Date()
+
+  // Reprocessa índices
+  buildIndexes()
+
+  return {
+    ok: true,
+    materiais: materiaisIndex.size,
+    ops: opsIndex.size,
+    faltas: faltasCount,
+    ignoradas,
+  }
+}
+
+function formatDate(val: unknown): string | null {
+  if (!val) return null
+  if (val instanceof Date) return val.toLocaleDateString('pt-BR')
+  const s = String(val).trim()
+  if (!s || s === '') return null
+  return s
+}
+
+function buildIndexes() {
+  materiaisIndex.clear()
+  opsIndex.clear()
+  faltasCount = 0
+
+  // Agrupar por material
+  const byMaterial = new Map<string, Sd4Row[]>()
+  for (const row of rows) {
+    if (!byMaterial.has(row.codigoMaterial)) byMaterial.set(row.codigoMaterial, [])
+    byMaterial.get(row.codigoMaterial)!.push(row)
+  }
+
+  for (const [codigo, linhas] of byMaterial) {
+    // Primeiro registro tem o saldo e PC
+    const primeiro = linhas[0]
+    const saldoAtual = primeiro.saldoAtual
+    const qtdPC = primeiro.qtdPC
+    const dataChegada = primeiro.dataChegada
+    const descricao = primeiro.descricao
+    const totalDisponivel = saldoAtual + qtdPC
+
+    // Ordenar OPs por data planejada ASC
+    const ops = linhas
+      .filter(l => l.codigoOP)
+      .sort((a, b) => {
+        if (!a.dataPlanejada) return 1
+        if (!b.dataPlanejada) return -1
+        return a.dataPlanejada.localeCompare(b.dataPlanejada)
+      })
+
+    const totalEmpenho = ops.reduce((s, o) => s + o.qtdEmpenho, 0)
+    const qtdFalta = Math.max(0, totalEmpenho - totalDisponivel)
+
+    // Encontrar OP crítica (onde o saldo zera)
+    let acumulado = 0
+    let opCritica: string | null = null
+    for (const op of ops) {
+      acumulado += op.qtdEmpenho
+      if (acumulado > totalDisponivel && !opCritica) {
+        opCritica = op.codigoOP
+      }
+    }
+
+    if (qtdFalta > 0) faltasCount++
+
+    materiaisIndex.set(codigo, {
+      codigo,
+      descricao,
+      saldoAtual,
+      qtdPC,
+      dataChegada,
+      qtdFalta,
+      totalEmpenho,
+      opCritica,
+      ops: ops.map(o => ({
+        codigoOP: o.codigoOP,
+        qtdEmpenho: o.qtdEmpenho,
+        dataPlanejada: o.dataPlanejada,
+      })),
+    })
+
+    // Indexar por OP também
+    for (const op of ops) {
+      if (!opsIndex.has(op.codigoOP)) {
+        opsIndex.set(op.codigoOP, {
+          op: op.codigoOP,
+          dataPlanejada: op.dataPlanejada,
+          materials: [],
+        })
+      }
+      if (qtdFalta > 0) {
+        opsIndex.get(op.codigoOP)!.materials.push(materiaisIndex.get(codigo)!)
+      }
+    }
+  }
+}
+
+export function getMaterialResumo(codigo: string): MaterialResumo | undefined {
+  // Busca exata e também busca parcial (case insensitive)
+  return materiaisIndex.get(codigo)
+    ?? Array.from(materiaisIndex.values()).find(m =>
+        m.codigo.toLowerCase().includes(codigo.toLowerCase())
+      )
+}
+
+export function getOpResumo(codigoOP: string) {
+  return opsIndex.get(codigoOP)
+    ?? Array.from(opsIndex.values()).find(o =>
+        o.op.toLowerCase().includes(codigoOP.toLowerCase())
+      )
+}
+
+export function getMaterialsComFalta() {
+  return Array.from(materiaisIndex.values())
+    .filter(m => m.qtdFalta > 0)
+    .map(m => ({
+      material: m.codigo,
+      descricao: m.descricao,
+      opCritica: m.opCritica ?? '—',
+      qtdFalta: m.qtdFalta,
+      saldoAtual: m.saldoAtual,
+      qtdPC: m.qtdPC,
+      dataChegada: m.dataChegada ?? '—',
+      previsao: m.dataChegada ?? '—',
+      status: m.qtdFalta > 100 ? 'critico' : m.qtdFalta > 20 ? 'atencao' : 'ok',
+      criticidade: m.qtdFalta > 100 ? 'Crítico' : m.qtdFalta > 20 ? 'Atenção' : 'OK',
+    }))
+    .sort((a, b) => b.qtdFalta - a.qtdFalta)
+}
+
+export function getSpreadsheetStatus() {
+  return {
+    loaded: rows.length > 0,
+    filename: _filename,
+    uploadedAt: _uploadedAt,
+    materiais: materiaisIndex.size,
+    ops: opsIndex.size,
+    faltas: faltasCount,
+    ignoradas: 0,
+  }
+}
+
+export function getSpreadsheetStats() {
+  return {
+    loaded: rows.length > 0,
+    materiais: materiaisIndex.size,
+    ops: opsIndex.size,
+    faltas: faltasCount,
+  }
+}
+
+export function getSpreadsheetPreview(limit = 20) {
+  return rows.slice(0, limit)
+}
+
+export function reloadLastSpreadsheet() {
+  if (rows.length === 0) throw new Error('Nenhuma planilha carregada')
+  buildIndexes()
+  return { ok: true }
+}
+
+PROBLEMA 3 — UPLOAD DE PLANILHA (rota)
+Em src/routes/spreadsheet.ts, garantir que o multer leia
+o campo file E também spreadsheet (o frontend pode mandar
+qualquer um dos dois):
+typescriptimport multer from 'multer'
+const upload = multer({ storage: multer.memoryStorage() })
+
+// Aceita campo 'file' ou 'spreadsheet'
+router.post('/upload',
+  upload.fields([{ name: 'file' }, { name: 'spreadsheet' }]),
+  (req, res) => {
+    const files = req.files as Record<string, Express.Multer.File[]>
+    const file = files['file']?.[0] ?? files['spreadsheet']?.[0]
+
+    if (!file) {
+      res.status(400).json({ ok: false, error: 'Nenhum arquivo enviado' })
+      return
+    }
+
+    const result = processSpreadsheet(file.buffer, file.originalname)
+    res.json(result)
+  }
+)
+
+REGRAS FINAIS
+
+Todos os imports relativos com .js no final
+Não criar arquivos novos além dos citados — só editar os existentes
+Testar com: POST /api/spreadsheet/upload com um .xlsx real
+Após upload: GET /api/spreadsheet/status deve retornar loaded: true
+GET /api/relatorio/faltas deve retornar array com os materiais em falta
+CompartilharConteúdoDockerfileCOMMIT_EDITMSGconfigdescriptionHEADindex.gitignoregitignore.npmrcnpmrc.replitreplit.replitignorereplitignorezapauto.htmlhtmlzapauto.htmlhtml.envenvpnpm-lock.yamlyaml.modules.yamlyamlvercel.json12 linhasjsonpackage.json17 linhasjsonpnpm-workspace.yaml123 linhasyamlreplit.md67 linhasmdtsconfig.base.json26 linhasjsontsconfig.json17 linhasjson# V0 — Refinamento Final: MRP Bot Painel
+
+## OBJETIVO
+Transformar o painel atual em um sistema 100% funcional e conectado 
+ao backend real no Replit. Remover todos os dados fictícios, ativar 
+todas as funcionalidades e preparar a integração com a API.
+
+---
+
+## PARTE 1 — ARQUIVO CENTRAL DE API (criarpastedImplementei o backend do ZapAuto em artifacts/api-server seguindo a arquitetura e requisitos que você passou: Express 5 + TypeScript, WhatsApp singleton com whatsapp-web.js, parser da aba SD4 em memória, Drizzle + PostgreSQL com fallback em memória e todas as rotas principais.
+
+Abaixo explico estrpasteddrizzle.config.ts12 linhastsdrizzle.config.ts12 linhastspackage.json36 linhasjsonREADME.md174 linhasmdrodar-zapauto.bat18 linhasbattsconfig.json20 linhasjson.pnpm-workspace-state.json26 linhasjsonindex.ts81 linhasts
