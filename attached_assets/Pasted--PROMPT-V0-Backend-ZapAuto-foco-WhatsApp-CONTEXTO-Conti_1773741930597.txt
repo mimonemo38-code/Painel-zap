@@ -1,0 +1,260 @@
+# PROMPT V0 — Backend ZapAuto (foco: WhatsApp)
+
+## CONTEXTO
+Continuar o backend já criado. O `src/index.ts` já existe com Express,
+CORS, rotas básicas e o servidor subindo na porta 3000.
+
+Preciso que você implemente o arquivo `src/lib/whatsapp.ts` completo
+e funcional, com foco em conectar ao WhatsApp via QR code e responder
+mensagens automaticamente.
+
+---
+
+## O QUE JÁ EXISTE (não recriar)
+
+- `src/index.ts` — Express rodando, rotas registradas
+- `src/routes/whatsapp.ts` — rotas GET/POST já definidas
+- `package.json` com `whatsapp-web.js`, `qrcode`, `puppeteer` instalados
+
+---
+
+## O QUE PRECISA CRIAR/COMPLETAR
+
+### `src/lib/whatsapp.ts` — singleton completo
+
+```typescript
+import { Client, LocalAuth, Message } from 'whatsapp-web.js'
+import qrcode from 'qrcode'
+```
+
+**Estado interno (variáveis de módulo):**
+```typescript
+let client: Client | null = null
+let lastQrBase64: string | null = null   // PNG base64 SEM prefixo data:image
+let connected = false
+let statusText = 'disconnected'
+let currentNumber: string | null = null
+```
+
+**Função `startWhatsappClient()`:**
+- Se já existe `client`, retorna sem fazer nada (singleton)
+- Cria `new Client({ authStrategy: new LocalAuth(), puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] } })`
+- Registra os eventos:
+
+**Evento `qr`:**
+```typescript
+client.on('qr', async (qr) => {
+  // Converte o qr string em PNG base64
+  lastQrBase64 = await qrcode.toDataURL(qr)
+  // Remove o prefixo "data:image/png;base64," e salva só o base64 puro
+  lastQrBase64 = lastQrBase64.replace('data:image/png;base64,', '')
+  statusText = 'qr_ready'
+  console.log('[WhatsApp] QR gerado — escaneie no celular')
+})
+```
+
+**Evento `authenticated`:**
+```typescript
+client.on('authenticated', () => {
+  statusText = 'authenticated'
+  console.log('[WhatsApp] Autenticado')
+})
+```
+
+**Evento `ready`:**
+```typescript
+client.on('ready', async () => {
+  connected = true
+  statusText = 'connected'
+  lastQrBase64 = null  // limpa QR pois não é mais necessário
+  const info = client!.info
+  currentNumber = info?.wid?.user ?? null
+  console.log('[WhatsApp] Conectado! Número:', currentNumber)
+})
+```
+
+**Evento `disconnected`:**
+```typescript
+client.on('disconnected', (reason) => {
+  connected = false
+  statusText = 'disconnected'
+  currentNumber = null
+  console.log('[WhatsApp] Desconectado:', reason)
+})
+```
+
+**Evento `message`:**
+```typescript
+client.on('message', async (message: Message) => {
+  // 1. Ignorar mensagens de grupos
+  if (message.from.includes('@g.us')) return
+
+  // 2. Extrair número limpo (sem @c.us)
+  const phone = message.from.replace('@c.us', '')
+  const texto = message.body.trim()
+
+  console.log(`[WhatsApp] Mensagem de ${phone}: "${texto}"`)
+
+  // 3. Verificar whitelist (importar de ../lib/db.js)
+  const contato = await getWhitelistByPhone(phone)
+  if (!contato || !contato.active) {
+    console.log(`[WhatsApp] ${phone} não está na whitelist — ignorando`)
+    return
+  }
+
+  // 4. Interpretar e responder
+  try {
+    const resultado = await interpretarTextoLivre(texto)
+    await message.reply(resultado.resposta)
+    console.log(`[WhatsApp] Resposta enviada para ${phone}`)
+
+    // 5. Salvar no histórico
+    await saveQueryHistory({
+      phone,
+      type: inferTipo(texto),
+      query: texto,
+      found: resultado.found,
+      response: resultado.resposta,
+    })
+  } catch (err) {
+    console.error('[WhatsApp] Erro ao processar mensagem:', err)
+  }
+})
+
+// Inicia o cliente
+client.initialize()
+```
+
+**Função auxiliar `inferTipo(texto)`:**
+```typescript
+function inferTipo(texto: string): 'material' | 'op' | 'urgente' {
+  if (texto.startsWith('!')) return 'urgente'
+  if (/^op\s*\d+/i.test(texto) || /^\d{6,}$/.test(texto.replace(/\s/g, ''))) return 'op'
+  return 'material'
+}
+```
+
+**Funções exportadas:**
+```typescript
+export function getWhatsappStatus() {
+  return { connected, status: statusText, number: currentNumber }
+}
+
+export function getWhatsappQrBase64(): string | null {
+  return lastQrBase64  // já é base64 puro, sem prefixo
+}
+
+export async function startWhatsappClient(): Promise<void> { ... }
+
+export async function disconnectWhatsappClient(): Promise<void> {
+  if (!client) return
+  await client.destroy()
+  client = null
+  connected = false
+  statusText = 'disconnected'
+  currentNumber = null
+  lastQrBase64 = null
+  console.log('[WhatsApp] Cliente destruído')
+}
+
+export async function listWhatsappContacts() {
+  if (!client || !connected) {
+    throw Object.assign(new Error('WhatsApp não conectado'), { status: 400 })
+  }
+  const contacts = await client.getContacts()
+  return contacts.map(c => ({
+    id: c.id._serialized,
+    name: c.name || c.pushname || '',
+    number: c.number,
+    isMyContact: c.isMyContact,
+  }))
+}
+```
+
+---
+
+## ROTA `src/routes/whatsapp.ts` — verificar e corrigir
+
+Garantir que os endpoints estejam assim:
+
+```typescript
+// GET /api/whatsapp/status
+router.get('/status', (_req, res) => {
+  res.json(getWhatsappStatus())
+})
+
+// GET /api/whatsapp/qr
+router.get('/qr', (_req, res) => {
+  const qr = getWhatsappQrBase64()
+  if (!qr) {
+    res.status(404).json({ ok: false, error: 'QR não disponível. Chame POST /connect primeiro.' })
+    return
+  }
+  res.json({ qr })  // base64 puro, sem prefixo
+})
+
+// POST /api/whatsapp/connect
+router.post('/connect', async (_req, res) => {
+  await startWhatsappClient()
+  res.json({ ok: true, message: 'Inicialização iniciada. Aguarde o QR em GET /api/whatsapp/qr' })
+})
+
+// POST /api/whatsapp/disconnect
+router.post('/disconnect', async (_req, res) => {
+  await disconnectWhatsappClient()
+  res.json({ ok: true })
+})
+
+// GET /api/whatsapp/contatos
+router.get('/contatos', async (_req, res) => {
+  const contacts = await listWhatsappContacts()
+  res.json(contacts)
+})
+```
+
+---
+
+## IMPORTS NECESSÁRIOS EM whatsapp.ts
+
+```typescript
+import { Client, LocalAuth } from 'whatsapp-web.js'
+import qrcode from 'qrcode'
+import { getWhitelistByPhone, saveQueryHistory } from './db.js'
+import { interpretarTextoLivre } from './query.js'
+```
+
+---
+
+## REGRAS OBRIGATÓRIAS
+
+1. Todos imports relativos terminam em `.js` (tsconfig NodeNext)
+2. Puppeteer sempre com `args: ['--no-sandbox', '--disable-setuid-sandbox']`
+   para funcionar no Windows sem permissões de admin
+3. O cliente é SINGLETON — nunca criar dois ao mesmo tempo
+4. Erros no evento `message` não podem derrubar o servidor — usar try/catch
+5. `getWhatsappQrBase64()` retorna o base64 SEM o prefixo `data:image/png;base64,`
+   porque o frontend adiciona o prefixo na tag `<img>`
+
+---
+
+## TESTE APÓS IMPLEMENTAR
+
+```bash
+# 1. Sobe o servidor
+pnpm dev
+
+# 2. Inicia o WhatsApp (em outro terminal ou Postman)
+POST http://localhost:3000/api/whatsapp/connect
+
+# 3. Aguarda ~5s e pega o QR
+GET http://localhost:3000/api/whatsapp/qr
+# → { "qr": "iVBORw0KGgoAAAANS..." }  (string base64 longa)
+
+# 4. Verifica status
+GET http://localhost:3000/api/whatsapp/status
+# → { "connected": false, "status": "qr_ready", "number": null }
+
+# 5. Após escanear com celular:
+GET http://localhost:3000/api/whatsapp/status
+# → { "connected": true, "status": "connected", "number": "5511999999999" }
+```
