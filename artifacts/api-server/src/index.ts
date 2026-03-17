@@ -1,6 +1,8 @@
 import express from 'express';
 import dotenv from 'dotenv';
 
+import { WhatsAppConnector } from './whatsapp';
+
 dotenv.config();
 
 const app = express();
@@ -29,6 +31,36 @@ app.post('/api/messages', express.json(), (req, res) => {
     text,
     timestamp: new Date()
   });
+});
+
+// WhatsApp init
+const waAuthDir = process.env.WHATSAPP_AUTH_DIR || './whatsapp-session';
+const wa = new WhatsAppConnector(waAuthDir);
+wa.init().catch((err) => {
+  console.error('WhatsApp init failed:', err);
+});
+
+// WhatsApp routes
+app.get('/wa/status', (req, res) => {
+  res.json(wa.getStatus());
+});
+
+app.get('/wa/qr', (req, res) => {
+  const qr = wa.getQR();
+  if (!qr) return res.status(404).json({ error: 'QR not available' });
+  res.json({ qr });
+});
+
+app.post('/wa/send', async (req, res) => {
+  const { to, message } = req.body;
+  if (!to || !message) return res.status(400).json({ error: 'to and message are required' });
+
+  try {
+    await wa.sendMessage(to, message);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
 });
 
 // Dashboard proxy indicator
