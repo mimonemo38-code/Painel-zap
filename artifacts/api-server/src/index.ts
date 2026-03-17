@@ -1,7 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 
-import { WhatsAppConnector } from './whatsapp';
+import { WhatsAppConnector } from './whatsapp.js';
 
 dotenv.config();
 
@@ -47,19 +47,23 @@ app.get('/wa/status', (req, res) => {
 
 app.get('/wa/qr', (req, res) => {
   const qr = wa.getQR();
-  if (!qr) return res.status(404).json({ error: 'QR not available' });
-  res.json({ qr });
+  if (!qr) {
+    return res.status(404).json({ error: 'QR not available' });
+  }
+  return res.json({ qr });
 });
 
 app.post('/wa/send', async (req, res) => {
   const { to, message } = req.body;
-  if (!to || !message) return res.status(400).json({ error: 'to and message are required' });
+  if (!to || !message) {
+    return res.status(400).json({ error: 'to and message are required' });
+  }
 
   try {
     await wa.sendMessage(to, message);
-    res.json({ ok: true });
+    return res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    return res.status(500).json({ error: String(err) });
   }
 });
 

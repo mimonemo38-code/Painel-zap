@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "node --import tsx/cjs src/index.ts",
-    "build": "esbuild src/index.ts --bundle --outfile=dist/index.cjs --format=cjs --external:express",
-    "start": "node dist/index.cjs",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
