@@ -28,15 +28,17 @@ Projeto monorepo com:
 
 ## Deploy (Railway / VPS)
 
-### Railway (Git-based)
+### Railway (recomendado)
 
-1. Crie um repositório no GitHub.
-2. Adicione a remote ao seu clone e envie:
+1. No Railway, crie um novo projeto e conecte ao repositório GitHub: `mimonemo38-code/Painel-zap`.
+2. Defina as variáveis de ambiente usando `.env.example` como referência.
+3. Na configuração do projeto, certifique-se de que o comando de execução seja:
    ```bash
-   git remote add origin https://github.com/<seu-usuario>/<seu-repo>.git
-   git push -u origin master
+   pnpm start
    ```
-3. No Railway, conecte o repositório e configure as variáveis de ambiente com base em `.env.example`.
+
+> Se o Railway não instalar dependências automaticamente com `pnpm`, force o uso de `pnpm` em:
+> - Build command: `pnpm install && pnpm start`
 
 ### Deploy com Docker
 

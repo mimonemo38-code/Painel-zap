@@ -1,0 +1,8 @@
+{
+  "environments": {
+    "production": {
+      "buildCommand": "pnpm install && pnpm start",
+      "startCommand": "pnpm start"
+    }
+  }
+}
